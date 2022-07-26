@@ -20,25 +20,24 @@ def load_youtube_api_key():
 def get_number_of_lines(file_name):
     with open(file_name, 'r') as f:
         # no really, this is somehow faster than sum()
-        return len([l for l in f])
+        return len(list(f))
 
 def get_duration(json_video):
     hours = 0
     minutes = 0
     seconds = 0
     s = json_video['items'][0]['contentDetails']['duration']
-    match = re.match(r'PT([0-5]?[\d])M([0-5]?[\d]?)S?', s)
-    if match:
+    if match := re.match(r'PT([0-5]?[\d])M([0-5]?[\d]?)S?', s):
         items = match.groups()
         minutes = items[0]
         seconds = items[1]
-    else:
-        match_with_hours = re.match(r'PT([\d]?[\d])H([0-5]?[\d]?)M?([0-5]?[\d]?)S?', s)
-        if match_with_hours:
-            items = match_with_hours.groups()
-            hours = items[0]
-            minutes = items[1]
-            seconds = items[2]
+    elif match_with_hours := re.match(
+        r'PT([\d]?[\d])H([0-5]?[\d]?)M?([0-5]?[\d]?)S?', s
+    ):
+        items = match_with_hours.groups()
+        hours = items[0]
+        minutes = items[1]
+        seconds = items[2]
 
     return hours, minutes, seconds
 
@@ -70,27 +69,33 @@ def main():
         data = f.read()
         new_data = []
         for i, line in enumerate(data.split('\n'), 1):
-            print('Parsing line: ' + str(i) + ' of ' + str(number_of_lines))
-            # FIXME: Assumes that no two videos have the exact same length
-            has_been_added_earlier = re.findall('\[\d\d:\d\d:\d\d\]', line)
-            if has_been_added_earlier:
+            print(f'Parsing line: {str(i)} of {str(number_of_lines)}')
+            if has_been_added_earlier := re.findall(
+                '\[\d\d:\d\d:\d\d\]', line
+            ):
                 new_data.append(line)
+            elif youtube_match := re.findall(
+                'http[s]?://www.youtube.com/watch\?v\=[a-zA-Z0-9_-]+', line
+            ):
+                link = youtube_match[0]
+                video_id = parse_qs(link.split('?')[1]).get('v')
+                try:
+                    r = requests.get(
+                        f'https://www.googleapis.com/youtube/v3/videos?key={youtube_api_key}&part=contentDetails&id={video_id}'
+                    )
+
+                except:
+                    log.append(
+                        f'The request to the youtube API went wrong. Video id: {video_id}.  Youtube api key: {youtube_api_key}.'
+                    )
+
+                duration = get_duration(r.json())
+                new_line = re.split('(\))', line)
+                new_line[1] += print_duration(duration)
+                new_data.append(''.join(new_line))
+                print(''.join(new_line))
             else:
-                youtube_match = re.findall('http[s]?://www.youtube.com/watch\?v\=[a-zA-Z0-9_-]+', line)
-                if youtube_match:
-                    link = youtube_match[0]
-                    video_id = parse_qs(link.split('?')[1]).get('v')
-                    try:
-                        r = requests.get('https://www.googleapis.com/youtube/v3/videos?key=' + youtube_api_key + '&part=contentDetails&id=' + video_id)
-                    except:
-                        log.append('The request to the youtube API went wrong. Video id: ' + video_id + '.  Youtube api key: ' + youtube_api_key + '.')
-                    duration = get_duration(r.json())
-                    new_line = re.split('(\))', line)
-                    new_line[1] += print_duration(duration)
-                    new_data.append(''.join(new_line))
-                    print(''.join(new_line))
-                else:
-                    new_data.append(line)
+                new_data.append(line)
         f.seek(0) # set file cursor to start of file
         f.write('\n'.join(new_data))
     handle_log(log)
